@@ -15,26 +15,26 @@ public partial class NativeClient
 
 #if WINDOWS_XP_OR_LATER
 
-    [LibraryImport("libpixeval_ech.dll")]
+    [LibraryImport("pixeval_ech.dll")]
     private static unsafe partial void init_client(
         NameResolution* nameResolutions,
         nuint nameResolutionsLength,
         nint dnsResolutionUrl,
         ClientInitializationCallback callback);
     
-    [LibraryImport("libpixeval_ech.dll")]
+    [LibraryImport("pixeval_ech.dll")]
     private static partial void send_request(
         FFIHttpRequestMessage requestMessage,
         HttpCompletionCallback callback,
         nint userData);
     
-    [LibraryImport("libpixeval_ech.dll")]
+    [LibraryImport("pixeval_ech.dll")]
     private static partial void free_response(FFIHttpResponseMessage response);
 
-    [LibraryImport("libpixeval_ech.dll")]
+    [LibraryImport("pixeval_ech.dll")]
     private static partial LoggerConfigurationResult configure_logger_path([MarshalAs(UnmanagedType.LPUTF8Str)] string path);
 
-    [LibraryImport("libpixeval_ech.dll")]
+    [LibraryImport("pixeval_ech.dll")]
     private static partial LoggerConfigurationResult configure_logger_level(LoggerLevel level);
 #elif LINUX
     [LibraryImport("libpixeval_ech.so")]
