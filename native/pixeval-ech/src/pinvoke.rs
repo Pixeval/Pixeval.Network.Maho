@@ -10,6 +10,7 @@ use regex::Regex;
 use reqwest::Method;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
+use std::error::Error;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fmt;
 use std::net::IpAddr;
@@ -441,7 +442,19 @@ async fn send_request_kernel(
         .body(body)
         .send()
         .await
-        .map_err(|e| RequestError::RequestFailure(e.to_string()))
+        .map_err(|e| RequestError::RequestFailure(format_reqwest_error(&e)))
+}
+
+fn format_reqwest_error(err: &reqwest::Error) -> String {
+    let mut s = format!("{}", err);
+
+    let mut current: &(dyn Error + 'static) = err;
+    while let Some(src) = current.source() {
+        let _ = write!(s, "\n\nCaused by: {}", src);
+        current = src;
+    }
+
+    s
 }
 
 async fn send_request_wrapped(
