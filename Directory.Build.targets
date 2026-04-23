@@ -1,0 +1,59 @@
+<Project>
+    <PropertyGroup>
+        <NativeProjectDirectory>$(MSBuildThisFileDirectory)native/pixeval-ech</NativeProjectDirectory>
+        <NativeProjectCrateName>pixeval_ech</NativeProjectCrateName>
+        <RustProfile Condition="'$(Configuration)' == 'Debug'">debug</RustProfile>
+        <RustProfile Condition="'$(RustProfile)' == ''">release</RustProfile>
+        <CargoBuildFlag Condition="'$(RustProfile)' == 'release'">--release</CargoBuildFlag>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' =='win-x64'">
+        <RustTarget>x86_64-pc-windows-msvc</RustTarget>
+        <RustBuildExtension>dll</RustBuildExtension>
+        <RustBuildPrefix />
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-arm64'">
+        <RustTarget>aarch64-pc-windows-msvc</RustTarget>
+        <RustBuildExtension>dll</RustBuildExtension>
+        <RustBuildPrefix />
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+        <RustTarget>x86_64-unknown-linux-gnu</RustTarget>
+        <RustBuildExtension>so</RustBuildExtension>
+        <RustBuildPrefix>lib</RustBuildPrefix>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">
+        <RustTarget>aarch64-unknown-linux-gnu</RustTarget>
+        <RustBuildExtension>so</RustBuildExtension>
+        <RustBuildPrefix>lib</RustBuildPrefix>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
+        <RustTarget>x86_64-apple-darwin</RustTarget>
+        <RustBuildExtension>dylib</RustBuildExtension>
+        <RustBuildPrefix>lib</RustBuildPrefix>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">
+        <RustTarget>aarch64-apple-darwin</RustTarget>
+        <RustBuildExtension>dylib</RustBuildExtension>
+        <RustBuildPrefix>lib</RustBuildPrefix>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <NativeBuildOutputDirectory>$(NativeProjectDirectory)/target/$(RustTarget)/$(RustProfile)</NativeBuildOutputDirectory>
+        <NativeBuildOutputFile>$(NativeBuildOutputDirectory)/$(RustBuildPrefix)$(NativeProjectCrateName).$(RustBuildExtension)</NativeBuildOutputFile>
+    </PropertyGroup>
+
+    <Target Name="BuildNative"
+            BeforeTargets="Build"
+            Condition="'$(RustTarget)' != ''">
+        <Message Importance="high" Text="Commencing the building of ech native library" />
+        <Exec WorkingDirectory="$(NativeProjectDirectory)"
+              Command="cargo build --target $(RustTarget) $(CargoBuildFlag)" />
+        <Copy SourceFiles="$(NativeBuildOutputFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    </Target>
+</Project>

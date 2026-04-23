@@ -1,0 +1,13 @@
+CreateFile
+CreateEvent
+SetFilePointer
+WriteFile
+SetEndOfFile
+TransmitFile
+WaitForSingleObject
+WSAGetLastError
+CloseHandle
+INVALID_SET_FILE_POINTER
+TF_USE_KERNEL_APC
+TF_WRITE_BEHIND
+WSAGetOverlappedResult

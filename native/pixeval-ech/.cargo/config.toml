@@ -1,0 +1,5 @@
+[build]
+rustflags = ["--cfg", "reqwest_unstable"]
+
+[http]
+proxy = ""
