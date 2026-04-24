@@ -1,3 +1,4 @@
+use std::ffi::c_char;
 use log::{LevelFilter, info, warn};
 use reqwest::Method;
 use reqwest::header::HeaderMap;
@@ -5,6 +6,8 @@ use simplelog::{ConfigBuilder, WriteLogger};
 use std::fs::{File, OpenOptions, create_dir_all};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use crate::marshal;
+use crate::pinvoke::{LoggerConfigurationResult, LoggerLevel};
 
 pub static CONFIGURED_LOG_FULL_PATH: OnceLock<PathBuf> = OnceLock::new();
 pub static CONFIGURED_LOG_LEVEL: OnceLock<LevelFilter> = OnceLock::new();
@@ -166,4 +169,78 @@ pub fn log_managed_error(target: &str, error: &str) -> Result<(), String> {
     init_logger()?;
     warn!("{} -> managed error: {}", target, error);
     Ok(())
+}
+
+pub fn log_ffi_error(target: &str, error: impl AsRef<str>) {
+    if let Err(err) = log_managed_error(target, error.as_ref()) {
+        eprintln!("Failed to log managed-facing error: {}", err);
+    }
+}
+
+pub fn log_ffi_call(invocation: impl AsRef<str>) {
+    if let Err(err) = log_pinvoke_call(invocation.as_ref()) {
+        eprintln!("Failed to log P/Invoke call: {}", err);
+    }
+}
+
+fn logger_configuration_error(error: impl Into<String>) -> LoggerConfigurationResult {
+    let error = error.into();
+    if is_logger_initialized() || has_logger_configuration() {
+        log_ffi_error("LoggerConfigurationResult", &error);
+    } else {
+        eprintln!("LoggerConfigurationResult -> managed error: {}", error);
+    }
+    LoggerConfigurationResult {
+        success: false,
+        error_reason: marshal::into_raw_c_string(error),
+    }
+}
+
+
+#[unsafe(no_mangle)]
+pub extern "C" fn configure_logger_path(path: *const c_char) -> LoggerConfigurationResult {
+    let invocation = format!("configure_logger_path({})", marshal::format_c_string_arg(path));
+    if path.is_null() {
+        return logger_configuration_error("Log file path pointer is null");
+    }
+
+    match marshal::read_c_string(path, "Log file path") {
+        Ok(path) => match set_configured_logger_path(path) {
+            Ok(_) => {
+                log_ffi_call(invocation);
+                LoggerConfigurationResult {
+                    success: true,
+                    error_reason: std::ptr::null(),
+                }
+            }
+            Err(err) => logger_configuration_error(err),
+        },
+        Err(err) => logger_configuration_error(err),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn configure_logger_level(level: i32) -> LoggerConfigurationResult {
+    let invocation = format!("configure_logger_level({})", level);
+    let level = match level {
+        x if x == LoggerLevel::Error as i32 => log::LevelFilter::Error,
+        x if x == LoggerLevel::Warn as i32 => log::LevelFilter::Warn,
+        x if x == LoggerLevel::Info as i32 => log::LevelFilter::Info,
+        x if x == LoggerLevel::Debug as i32 => log::LevelFilter::Debug,
+        x if x == LoggerLevel::Trace as i32 => log::LevelFilter::Trace,
+        _ => {
+            return logger_configuration_error(format!("Invalid logger level value: {}", level));
+        }
+    };
+
+    match set_configured_log_level(level) {
+        Ok(_) => {
+            log_ffi_call(invocation);
+            LoggerConfigurationResult {
+                success: true,
+                error_reason: std::ptr::null(),
+            }
+        }
+        Err(err) => logger_configuration_error(err),
+    }
 }

@@ -1,16 +1,13 @@
-use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
 use rustls::client::{EchConfig, EchMode};
 use rustls::crypto::aws_lc_rs::default_provider;
 use rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES;
 use rustls::{ClientConfig, RootCertStore};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::net::IpAddr;
 use std::sync::Arc;
 
-use crate::regex::RegexKey;
-use crate::resolution::{SelectiveResolver, current_dns_resolution_url};
+use crate::resolution::{current_dns_resolution_url, DelegatedResolver};
 
 #[derive(Debug, Clone)]
 pub struct EchFailure(pub(crate) String);
@@ -78,9 +75,7 @@ async fn fetch_cloudflare_ech_bytes() -> Result<Vec<u8>, EchFailure> {
     }
 }
 
-pub async fn build_ech_client(
-    resolution_table: HashMap<RegexKey, Vec<IpAddr>>,
-) -> Result<reqwest::Client, EchFailure> {
+pub async fn build_ech_client(delegated_resolver: Arc<DelegatedResolver>) -> Result<reqwest::Client, EchFailure> {
     let ech_bytes = fetch_cloudflare_ech_bytes().await?;
     let ech_config = EchConfig::new(ech_bytes.into(), ALL_SUPPORTED_SUITES)
         .map_err(|e| EchFailure(format!("Failed to parse ECH config list: {}", e)))?;
@@ -98,7 +93,7 @@ pub async fn build_ech_client(
 
     reqwest::Client::builder()
         .tls_backend_preconfigured(tls_config)
-        .dns_resolver(Arc::new(SelectiveResolver::new(resolution_table)))
+        .dns_resolver(delegated_resolver)
         .no_proxy()
         .build()
         .map_err(|e| EchFailure(format!("Failed to build reqwest client: {}", e)))
