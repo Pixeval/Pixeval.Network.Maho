@@ -1,7 +1,8 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
-    sync::OnceLock,
+    os::raw::c_char,
+    sync::{OnceLock, RwLock},
 };
 
 use hyper_util::client::legacy::connect::dns::{GaiResolver, Name};
@@ -10,8 +11,22 @@ use reqwest::dns::{Addrs, Resolve};
 use tower_service::Service;
 
 use crate::regex::RegexKey;
-
 pub static CONFIGURED_DNS_RESOLUTION_URL: OnceLock<Url> = OnceLock::new();
+
+pub static DNS_RESOLUTION_GLOBAL_CALLBACK: RwLock<Option<RegisterDnsCallback>> = RwLock::new(None);
+
+pub type RegisterDnsCallback = unsafe extern "C" fn(i64, *const c_char);
+
+pub extern "C" fn register_dns_resolution_callback(callback: RegisterDnsCallback) -> bool {
+    let result = DNS_RESOLUTION_GLOBAL_CALLBACK.write();
+    match result {
+        Ok(mut old) => {
+            *old = Some(callback);
+            true
+        }
+        Err(_) => false,
+    }
+}
 
 pub struct SelectiveResolver {
     resolution_table: HashMap<RegexKey, Vec<IpAddr>>,
