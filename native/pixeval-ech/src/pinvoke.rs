@@ -1,16 +1,25 @@
 use std::ffi::{c_char, c_void};
+use crate::marshal;
 
 #[repr(C)]
-pub struct NameResolution {
-    pub regex: *const c_char,
-    pub ips: *const *const c_char,
-    pub ips_len: usize,
-}
-
-#[repr(C)]
-pub struct LoggerConfigurationResult {
+pub struct InteropOperationResult {
     pub success: bool,
     pub error_reason: *const c_char,
+}
+
+impl <T> From<Result<T, String>> for InteropOperationResult {
+    fn from(result: Result<T, String>) -> Self {
+        match result {
+            Ok(_) => InteropOperationResult {
+                success: true,
+                error_reason: std::ptr::null(),
+            },
+            Err(err) => InteropOperationResult {
+                success: false,
+                error_reason: marshal::into_raw_c_string(err),
+            },
+        }
+    }
 }
 
 #[repr(i32)]

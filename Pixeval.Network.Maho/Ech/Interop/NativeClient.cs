@@ -1,17 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Pixeval.Network.Maho.Ech;
-
-
-public enum LoggerLevel : int
-{
-    Error = 0,
-    Warn = 1,
-    Info = 2,
-    Debug = 3,
-    Trace = 4
-}
+namespace Pixeval.Network.Maho.Ech.Interop;
 
 [StructLayout(LayoutKind.Sequential)]
 public struct FFIHttpRequestMessage : IDisposable
@@ -50,14 +40,6 @@ public struct FFIHttpRequestMessage : IDisposable
 }
 
 [StructLayout(LayoutKind.Sequential)]
-public struct NameResolution
-{
-    public nint Regex;
-    public nint IpAddresses;
-    public nuint IpLength;
-}
-
-[StructLayout(LayoutKind.Sequential)]
 public struct FFIHttpResponseMessage
 {
     public byte PrematureDeath;
@@ -69,20 +51,28 @@ public struct FFIHttpResponseMessage
     public nuint BodyLength;
 }
 
-[StructLayout(LayoutKind.Sequential)]
-public struct LoggerConfigurationResult
+public static partial class NativeClient
 {
-    public byte Success;
-    public nint ErrorReason;
-}
+    public delegate void ClientCreationCallback(bool success, nint clientHandle);
 
-[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-public delegate void HttpCompletionCallback(
-    ulong id, 
-    FFIHttpResponseMessage response,
-    nint userData);
+    public delegate void HttpCompletionCallback(long requestToken, FFIHttpResponseMessage response, nint userData);
     
-[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-public delegate void ClientInitializationCallback(
-    bool success,
-    [MarshalAs(UnmanagedType.LPUTF8Str)] string errorMessage);
+    [LibraryImport("pixeval_ech")]
+    public static partial void begin_create_client(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string dnsServer,
+        Resolution.ManagedDnsResolutionCallback managedDnsResolutionCallback,
+        ClientCreationCallback callback);
+
+    [LibraryImport("pixeval_ech")]
+    public static partial void free_client(nint clientHandle);
+
+    [LibraryImport("pixeval_ech")]
+    public static partial void free_response(FFIHttpResponseMessage response);
+    
+    [LibraryImport("pixeval_ech")]
+    public static partial void send_request(
+        nint clientHandle,
+        FFIHttpRequestMessage requestMessage,
+        HttpCompletionCallback completionCallback,
+        nint userData);
+}

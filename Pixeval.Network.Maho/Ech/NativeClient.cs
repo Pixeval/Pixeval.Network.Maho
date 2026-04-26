@@ -3,88 +3,21 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
+using Pixeval.Network.Maho.Ech.Interop;
 
 namespace Pixeval.Network.Maho.Ech;
 
-public partial class NativeClient
+public class NativeClient(IDnsResolver dnsResolver) : IDisposable
 {
     private int _requestIdCounter;
 
+    private nint _nativeClientHandle;
+
     public bool Initialized { get; private set; }
 
-#if WINDOWS_XP_OR_LATER
-
-    [LibraryImport("pixeval_ech.dll")]
-    private static unsafe partial void init_client(
-        NameResolution* nameResolutions,
-        nuint nameResolutionsLength,
-        nint dnsResolutionUrl,
-        ClientInitializationCallback callback);
-    
-    [LibraryImport("pixeval_ech.dll")]
-    private static partial void send_request(
-        FFIHttpRequestMessage requestMessage,
-        HttpCompletionCallback callback,
-        nint userData);
-    
-    [LibraryImport("pixeval_ech.dll")]
-    private static partial void free_response(FFIHttpResponseMessage response);
-
-    [LibraryImport("pixeval_ech.dll")]
-    private static partial LoggerConfigurationResult configure_logger_path([MarshalAs(UnmanagedType.LPUTF8Str)] string path);
-
-    [LibraryImport("pixeval_ech.dll")]
-    private static partial LoggerConfigurationResult configure_logger_level(LoggerLevel level);
-#elif LINUX
-    [LibraryImport("libpixeval_ech.so")]
-    private static unsafe partial void init_client(
-        NameResolution* nameResolutions,
-        nuint nameResolutionsLength,
-        nint dnsResolutionUrl,
-        ClientInitializationCallback callback);
-    
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial void send_request(
-        FFIHttpRequestMessage requestMessage,
-        HttpCompletionCallback callback,
-        nint userData);
-    
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial void free_response(FFIHttpResponseMessage response);
-
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial LoggerConfigurationResult configure_logger_path([MarshalAs(UnmanagedType.LPUTF8Str)] string path);
-
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial LoggerConfigurationResult configure_logger_level(LoggerLevel level);
-#elif OSX    
-    [LibraryImport("libpixeval_ech.so")]
-    private static unsafe partial void init_client(
-        NameResolution* nameResolutions,
-        nuint nameResolutionsLength,
-        nint dnsResolutionUrl,
-        ClientInitializationCallback callback);
-    
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial void send_request(
-        FFIHttpRequestMessage requestMessage,
-        HttpCompletionCallback callback,
-        nint userData);
-    
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial void free_response(FFIHttpResponseMessage response);
-
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial LoggerConfigurationResult configure_logger_path([MarshalAs(UnmanagedType.LPUTF8Str)] string path);
-
-    [LibraryImport("libpixeval_ech.so")]
-    private static partial LoggerConfigurationResult configure_logger_level(LoggerLevel level);
-#endif
-    
     public static void SetLoggerLevel(LoggerLevel level)
     {
-        var result = configure_logger_level(level);
+        var result = Logging.configure_logger_level(level);
         if (result.Success != 1)
         {
             throw new InvalidOperationException($"Failed to set the native client logger level: {result.ErrorReason}");
@@ -92,7 +25,7 @@ public partial class NativeClient
     }
     
     [MethodImpl(MethodImplOptions.Synchronized)]
-    public Task InitClientAsync(Dictionary<Regex, IPAddress[]> resolutionMap, string dnsResolutionUrl, string logPath = "")
+    public Task InitClientAsync(string dnsResolutionUrl, string logPath = "")
     {
         if (Initialized)
         {
@@ -102,91 +35,58 @@ public partial class NativeClient
         Initialized = true;
         if (logPath != string.Empty)
         {
-            var result = configure_logger_path(logPath);
+            var result = Logging.configure_logger_path(logPath);
             if (result.Success != 1)
             {
                 throw new InvalidOperationException($"Failed to set the native client logger path: {result.ErrorReason}");
             }
         }
         var taskCompletionSource = new TaskCompletionSource();
-        unsafe
+        Interop.NativeClient.begin_create_client(dnsResolutionUrl, ManagedDnsResolutionCallback, (success, handle) =>
         {
-            var marshalledNameResolution = MarshalNameResolutionMap(resolutionMap);
-            var marshalledDnsResolutionUrl = AllocateUtf8CString(dnsResolutionUrl);
-            init_client(marshalledNameResolution, (nuint) resolutionMap.Count, marshalledDnsResolutionUrl, (success, errorMessage) =>
+            if (!success)
             {
-                if (success)
-                {
-                    taskCompletionSource.SetResult();
-                }
-                else
-                {
-                    taskCompletionSource.SetException(new Exception(errorMessage));
-                }
-
-                FreeNameResolutionPointer(marshalledNameResolution, (nuint) resolutionMap.Count);
-                Marshal.FreeHGlobal(marshalledDnsResolutionUrl);
-            });
-        }
+                taskCompletionSource.SetException(new InvalidOperationException("Failed to create native client"));
+            }
+            else
+            {
+                _nativeClientHandle = handle;
+                taskCompletionSource.SetResult();
+            }
+        });
 
         return taskCompletionSource.Task;
     }
     
-    private static unsafe NameResolution* MarshalNameResolutionMap(Dictionary<Regex, IPAddress[]> resolutionMap)
+    // ReSharper disable once AsyncVoidMethod
+    private async void ManagedDnsResolutionCallback(long requestToken, string hostname)
     {
-        var pFat = (NameResolution*) NativeMemory.AllocZeroed((nuint) (resolutionMap.Count * sizeof(NameResolution)));
-        var list = resolutionMap.ToList();
-        for (var i = 0; i < list.Count; i++)
+        InteropOperationResult interopResult;
+        try
         {
-            var (key, ipAddresses) = list[i];
-            var regexPtr = AllocateUtf8CString(key.ToString());
-
-            var pAddresses = (nint*) NativeMemory.AllocZeroed((nuint) (ipAddresses.Length * sizeof(nint)));
-            for (var j = 0; j < ipAddresses.Length; j++)
-            {
-                *(pAddresses + j) = AllocateUtf8CString(ipAddresses[j].ToString());
-            }
-
-            (pFat + i)->Regex = regexPtr;
-            (pFat + i)->IpAddresses = (nint) pAddresses;
-            (pFat + i)->IpLength = (nuint) ipAddresses.Length;
+            var result = await dnsResolver.LookupAsync(hostname);
+            interopResult = Resolution.complete_resolution(_nativeClientHandle, requestToken, MarshalIpAddresses(result), (nuint) result.Length);
+        }
+        catch (Exception e)
+        {
+            interopResult = Resolution.complete_resolution_failure(_nativeClientHandle, requestToken, e.ToString());
         }
 
-        return pFat;
+        if (interopResult.Success != 1)
+        {
+            // TODO log the error
+        }
     }
 
-    private static unsafe void FreeNameResolutionPointer(NameResolution* nameResolution, nuint len)
+    private static unsafe nint MarshalIpAddresses(IPAddress[] addresses)
     {
-        if (nameResolution == null || len == 0)
+        var pAddresses = (nint*) NativeMemory.AllocZeroed((nuint) (addresses.Length * sizeof(nint)));
+        for (var j = 0; j < addresses.Length; j++)
         {
-            return;
+            *(pAddresses + j) = AllocateUtf8CString(addresses[j].ToString());
         }
-        
-        for (nuint i = 0; i < len; i++)
-        {
-            var item = nameResolution + i;
 
-            if (item->Regex != 0)
-            {
-                NativeMemory.Free((void*)item->Regex);
-            }
-
-            if (item->IpAddresses != 0)
-            {
-                var pIps = (nint*)item->IpAddresses;
-
-                for (nuint j = 0; j < item->IpLength; j++)
-                {
-                    if (pIps[j] != 0)
-                    {
-                        NativeMemory.Free((void*)pIps[j]);
-                    }
-                }
-
-                NativeMemory.Free(pIps);
-            }
-        }
-        NativeMemory.Free(nameResolution);
+        return new nint(pAddresses);
     }
 
     public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
@@ -197,12 +97,12 @@ public partial class NativeClient
         }
         using var marshalledRequestMessage = await MarshalRequestMessageAsync(request);
         var taskCompletionSource = new TaskCompletionSource<FFIHttpResponseMessage>();
-        send_request(marshalledRequestMessage, (_, response, _) => taskCompletionSource.SetResult(response), nint.Zero);
+        Interop.NativeClient.send_request(_nativeClientHandle, marshalledRequestMessage, (_, response, _) => taskCompletionSource.SetResult(response), nint.Zero);
         var ffiResponse = await taskCompletionSource.Task;
         var result = ffiResponse.PrematureDeath != 0
             ? throw new HttpRequestException($"Request failed prematurely: {Marshal.PtrToStringUTF8(ffiResponse.PrematureDeathReason)}") 
             : UnmarshalHttpResponseMessage(ffiResponse);
-        free_response(ffiResponse);
+        Interop.NativeClient.free_response(ffiResponse);
         return result;
     }
 
@@ -294,5 +194,13 @@ public partial class NativeClient
         }
 
         return pHeaders;
+    }
+
+    public void Dispose()
+    {
+        if (_nativeClientHandle != nint.Zero)
+        {
+            Interop.NativeClient.free_client(_nativeClientHandle);
+        }
     }
 }

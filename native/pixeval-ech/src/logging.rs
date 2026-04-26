@@ -7,7 +7,7 @@ use std::fs::{File, OpenOptions, create_dir_all};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use crate::marshal;
-use crate::pinvoke::{LoggerConfigurationResult, LoggerLevel};
+use crate::pinvoke::{InteropOperationResult, LoggerLevel};
 
 pub static CONFIGURED_LOG_FULL_PATH: OnceLock<PathBuf> = OnceLock::new();
 pub static CONFIGURED_LOG_LEVEL: OnceLock<LevelFilter> = OnceLock::new();
@@ -183,14 +183,14 @@ pub fn log_ffi_call(invocation: impl AsRef<str>) {
     }
 }
 
-fn logger_configuration_error(error: impl Into<String>) -> LoggerConfigurationResult {
+fn logger_configuration_error(error: impl Into<String>) -> InteropOperationResult {
     let error = error.into();
     if is_logger_initialized() || has_logger_configuration() {
-        log_ffi_error("LoggerConfigurationResult", &error);
+        log_ffi_error("InteropOperationResult", &error);
     } else {
-        eprintln!("LoggerConfigurationResult -> managed error: {}", error);
+        eprintln!("InteropOperationResult -> managed error: {}", error);
     }
-    LoggerConfigurationResult {
+    InteropOperationResult {
         success: false,
         error_reason: marshal::into_raw_c_string(error),
     }
@@ -198,7 +198,7 @@ fn logger_configuration_error(error: impl Into<String>) -> LoggerConfigurationRe
 
 
 #[unsafe(no_mangle)]
-pub extern "C" fn configure_logger_path(path: *const c_char) -> LoggerConfigurationResult {
+pub extern "C" fn configure_logger_path(path: *const c_char) -> InteropOperationResult {
     let invocation = format!("configure_logger_path({})", marshal::format_c_string_arg(path));
     if path.is_null() {
         return logger_configuration_error("Log file path pointer is null");
@@ -208,7 +208,7 @@ pub extern "C" fn configure_logger_path(path: *const c_char) -> LoggerConfigurat
         Ok(path) => match set_configured_logger_path(path) {
             Ok(_) => {
                 log_ffi_call(invocation);
-                LoggerConfigurationResult {
+                InteropOperationResult {
                     success: true,
                     error_reason: std::ptr::null(),
                 }
@@ -220,7 +220,7 @@ pub extern "C" fn configure_logger_path(path: *const c_char) -> LoggerConfigurat
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn configure_logger_level(level: i32) -> LoggerConfigurationResult {
+pub extern "C" fn configure_logger_level(level: i32) -> InteropOperationResult {
     let invocation = format!("configure_logger_level({})", level);
     let level = match level {
         x if x == LoggerLevel::Error as i32 => log::LevelFilter::Error,
@@ -236,7 +236,7 @@ pub extern "C" fn configure_logger_level(level: i32) -> LoggerConfigurationResul
     match set_configured_log_level(level) {
         Ok(_) => {
             log_ffi_call(invocation);
-            LoggerConfigurationResult {
+            InteropOperationResult {
                 success: true,
                 error_reason: std::ptr::null(),
             }

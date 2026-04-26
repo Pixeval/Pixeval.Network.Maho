@@ -6,8 +6,7 @@ use rustls::crypto::aws_lc_rs::hpke::ALL_SUPPORTED_SUITES;
 use rustls::{ClientConfig, RootCertStore};
 use serde_json::Value;
 use std::sync::Arc;
-
-use crate::resolution::{current_dns_resolution_url, DelegatedResolver};
+use crate::resolution::DelegatedResolver;
 
 #[derive(Debug, Clone)]
 pub struct EchFailure(pub(crate) String);
@@ -26,14 +25,12 @@ fn extract_ech_parameter(ech_data: &str) -> Result<String, EchFailure> {
     Ok(String::from(&remainder[..end_idx]))
 }
 
-async fn fetch_cloudflare_ech_bytes() -> Result<Vec<u8>, EchFailure> {
-    let dns_resolution_url = current_dns_resolution_url()
-        .ok_or_else(|| EchFailure(String::from("DNS resolution URL has not been configured")))?;
+async fn fetch_cloudflare_ech_bytes(resolver: &DelegatedResolver) -> Result<Vec<u8>, EchFailure> {
     let result = reqwest::ClientBuilder::new()
         .no_proxy()
         .build()
         .unwrap()
-        .get(dns_resolution_url)
+        .get(&resolver.dns_url)
         .send()
         .await;
     let https_record_code = 65;
@@ -76,7 +73,7 @@ async fn fetch_cloudflare_ech_bytes() -> Result<Vec<u8>, EchFailure> {
 }
 
 pub async fn build_ech_client(delegated_resolver: Arc<DelegatedResolver>) -> Result<reqwest::Client, EchFailure> {
-    let ech_bytes = fetch_cloudflare_ech_bytes().await?;
+    let ech_bytes = fetch_cloudflare_ech_bytes(&delegated_resolver).await?;
     let ech_config = EchConfig::new(ech_bytes.into(), ALL_SUPPORTED_SUITES)
         .map_err(|e| EchFailure(format!("Failed to parse ECH config list: {}", e)))?;
     let mut root_store = RootCertStore::empty();

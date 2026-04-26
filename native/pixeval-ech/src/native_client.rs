@@ -3,7 +3,7 @@
 use crate::async_runtime::ffi_runtime;
 use crate::logging::{log_ffi_error, log_http_request};
 use crate::pinvoke::{FFIHttpRequestMessage, FFIHttpResponseMessage};
-use crate::resolution::{DelegatedResolver, ManagedClientHandle, ManagedDnsResolutionCallback};
+use crate::resolution::{DelegatedResolver, ManagedDnsResolutionCallback};
 use crate::util::format_error;
 use crate::{client_builder, logging, marshal};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -16,7 +16,8 @@ use std::sync::atomic::AtomicI64;
 use std::sync::{Arc, Mutex};
 
 pub struct NativeClient {
-    client: reqwest::Client
+    pub client: reqwest::Client,
+    pub resolver: Arc<DelegatedResolver>
 }
 
 pub enum RequestError {
@@ -37,7 +38,6 @@ pub type ClientCreationCallback = extern "C" fn(success: bool, client_handle: *c
 pub type HttpCompletionCallback = extern "C" fn(id: u64, response: FFIHttpResponseMessage, user_data: *const c_void);
 
 pub unsafe extern "C" fn begin_create_client(
-    managed_ctx: ManagedClientHandle,
     dns_server: *const c_char,
     dns_callback: ManagedDnsResolutionCallback,
     client_creation_callback: ClientCreationCallback,
@@ -54,10 +54,9 @@ pub unsafe extern "C" fn begin_create_client(
             "" // Return an empty string to satisfy the type, though it won't be used.
         });
     let resolver = DelegatedResolver {
-        managed_ctx,
-        callback: dns_callback,
+        callback: Arc::new(Mutex::new(dns_callback)),
         pending: Arc::new(Mutex::new(HashMap::new())),
-        request_token: AtomicI64::new(0),
+        request_token: Arc::new(AtomicI64::new(0)),
         dns_url: String::from(dns_server_n)
     };
     let resolver_arc = Arc::new(resolver);
@@ -65,7 +64,7 @@ pub unsafe extern "C" fn begin_create_client(
         let client_res = client_builder::build_ech_client(resolver_arc.clone()).await;
         match client_res {
             Ok(client) => {
-                let heap_allocated_native_client = Box::new(NativeClient { client });
+                let heap_allocated_native_client = Box::new(NativeClient { client, resolver: resolver_arc });
                 client_creation_callback(true, Box::into_raw(heap_allocated_native_client), std::ptr::null());
             }
             Err(e) => {
@@ -171,11 +170,17 @@ unsafe extern "C" fn send_request(
         let request_id = request_message.request_id;
         let body = std::slice::from_raw_parts(request_message.body, request_message.body_len).to_vec();
         let user_data_safe = user_data as usize;
-        let inner = (&*native_client).clone();
-        ffi_runtime().spawn(async move {
-            let resp = inner.send_request_wrapped(request_id, url, method, header_map, body).await;
-            callback(request_id, resp, user_data_safe as *mut c_void)
-        });
+        match native_client.as_ref() {
+            None => {
+                callback(request_message.request_id, ffi_error_response("Invalid client handle pointer"), user_data);
+            }
+            Some(inner) => {
+                ffi_runtime().spawn(async move {
+                    let resp = inner.send_request_wrapped(request_id, url, method, header_map, body).await;
+                    callback(request_id, resp, user_data_safe as *mut c_void)
+                });
+            }
+        }
     }
 }
 
