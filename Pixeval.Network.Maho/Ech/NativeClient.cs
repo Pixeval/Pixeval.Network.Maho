@@ -75,13 +75,14 @@ public class NativeClient(IDnsResolver dnsResolver) : IDisposable
         if (interopResult.Success != 1)
         {
             // TODO log the error
+            Console.WriteLine(Marshal.PtrToStringUTF8(interopResult.ErrorReason));
         }
     }
 
-    private static unsafe nint MarshalIpAddresses(IPAddress[] addresses)
+    private static unsafe nint MarshalIpAddresses(IReadOnlyList<IPAddress> addresses)
     {
-        var pAddresses = (nint*) NativeMemory.AllocZeroed((nuint) (addresses.Length * sizeof(nint)));
-        for (var j = 0; j < addresses.Length; j++)
+        var pAddresses = (nint*) NativeMemory.AllocZeroed((nuint) (addresses.Count * sizeof(nint)));
+        for (var j = 0; j < addresses.Count; j++)
         {
             *(pAddresses + j) = AllocateUtf8CString(addresses[j].ToString());
         }

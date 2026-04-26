@@ -7,6 +7,5 @@ public struct InteropOperationResult
 {
     public byte Success;
 
-    [MarshalAs(UnmanagedType.LPUTF8Str)]
     public nint ErrorReason;
 }

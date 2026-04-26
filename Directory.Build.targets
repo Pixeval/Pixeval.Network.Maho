@@ -1,43 +1,69 @@
 <Project>
     <PropertyGroup>
-        <NativeProjectDirectory>$(MSBuildThisFileDirectory)native/pixeval-ech</NativeProjectDirectory>
+        <NativeProjectDirectory>$(MSBuildThisFileDirectory)/native/pixeval-ech</NativeProjectDirectory>
         <NativeProjectCrateName>pixeval_ech</NativeProjectCrateName>
+        <NativeRuntimeIdentifier Condition="'$(NativeRuntimeIdentifier)' == '' and '$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</NativeRuntimeIdentifier>
+        <NativeHostArchitecture>$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)</NativeHostArchitecture>
         <RustProfile Condition="'$(Configuration)' == 'Debug'">debug</RustProfile>
         <RustProfile Condition="'$(RustProfile)' == ''">release</RustProfile>
         <CargoBuildFlag Condition="'$(RustProfile)' == 'release'">--release</CargoBuildFlag>
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(RuntimeIdentifier)' =='win-x64'">
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows')) and '$(NativeHostArchitecture)' == 'Arm64'">
+        <NativeRuntimeIdentifier>win-arm64</NativeRuntimeIdentifier>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">
+        <NativeRuntimeIdentifier>win-x64</NativeRuntimeIdentifier>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Linux')) and '$(NativeHostArchitecture)' == 'Arm64'">
+        <NativeRuntimeIdentifier>linux-arm64</NativeRuntimeIdentifier>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Linux'))">
+        <NativeRuntimeIdentifier>linux-x64</NativeRuntimeIdentifier>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('OSX')) and '$(NativeHostArchitecture)' == 'Arm64'">
+        <NativeRuntimeIdentifier>osx-arm64</NativeRuntimeIdentifier>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">
+        <NativeRuntimeIdentifier>osx-x64</NativeRuntimeIdentifier>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' =='win-x64'">
         <RustTarget>x86_64-pc-windows-msvc</RustTarget>
         <RustBuildExtension>dll</RustBuildExtension>
         <RustBuildPrefix />
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-arm64'">
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == 'win-arm64'">
         <RustTarget>aarch64-pc-windows-msvc</RustTarget>
         <RustBuildExtension>dll</RustBuildExtension>
         <RustBuildPrefix />
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == 'linux-x64'">
         <RustTarget>x86_64-unknown-linux-gnu</RustTarget>
         <RustBuildExtension>so</RustBuildExtension>
         <RustBuildPrefix>lib</RustBuildPrefix>
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == 'linux-arm64'">
         <RustTarget>aarch64-unknown-linux-gnu</RustTarget>
         <RustBuildExtension>so</RustBuildExtension>
         <RustBuildPrefix>lib</RustBuildPrefix>
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == 'osx-x64'">
         <RustTarget>x86_64-apple-darwin</RustTarget>
         <RustBuildExtension>dylib</RustBuildExtension>
         <RustBuildPrefix>lib</RustBuildPrefix>
     </PropertyGroup>
 
-    <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">
+    <PropertyGroup Condition="'$(NativeRuntimeIdentifier)' == 'osx-arm64'">
         <RustTarget>aarch64-apple-darwin</RustTarget>
         <RustBuildExtension>dylib</RustBuildExtension>
         <RustBuildPrefix>lib</RustBuildPrefix>

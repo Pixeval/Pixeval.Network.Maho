@@ -37,6 +37,7 @@ impl fmt::Display for RequestError {
 pub type ClientCreationCallback = extern "C" fn(success: bool, client_handle: *const NativeClient, error_reason: *const c_char);
 pub type HttpCompletionCallback = extern "C" fn(id: u64, response: FFIHttpResponseMessage, user_data: *const c_void);
 
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn begin_create_client(
     dns_server: *const c_char,
     dns_callback: ManagedDnsResolutionCallback,
@@ -75,6 +76,7 @@ pub unsafe extern "C" fn begin_create_client(
     });
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn free_client(client_handle: *const NativeClient) {
     if client_handle.is_null() {
         return;

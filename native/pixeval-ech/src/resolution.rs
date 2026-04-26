@@ -15,6 +15,7 @@ use crate::pinvoke::InteropOperationResult;
 
 pub type ManagedDnsResolutionCallback = unsafe extern "C" fn(i64, *const c_char);
 
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn complete_resolution(
     native_client: *mut NativeClient,
     request_id: i64,
@@ -52,7 +53,7 @@ pub unsafe extern "C" fn complete_resolution(
         }
     }
 }
-
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn complete_resolution_failure(
     native_client: *mut NativeClient,
     request_id: i64,

@@ -1,5 +1,5 @@
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
-using System.IO.MemoryMappedFiles;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -14,6 +14,8 @@ using Windows.Win32.Foundation;
 using Windows.Win32.Networking.WinSock;
 using Windows.Win32.Security;
 using Windows.Win32.Storage.FileSystem;
+#elif OSX
+using System.IO.MemoryMappedFiles;
 #endif
 
 #pragma warning disable CS8981 // 该类型名称仅包含小写 ascii 字符。此类名称可能会成为该语言的保留值。
@@ -71,7 +73,7 @@ public static partial class SocketDesynchronizer
         IntPtr evt = 0;
         try
         {
-            evt = PInvoke.CreateEvent(null, true, false).DangerousGetHandle();
+            evt = PInvoke.CreateEvent((SECURITY_ATTRIBUTES?) null, true, false).DangerousGetHandle();
 
             if (evt <= 0)
             {
