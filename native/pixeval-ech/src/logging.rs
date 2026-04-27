@@ -6,15 +6,17 @@ use std::ffi::c_char;
 use std::sync::{Arc, Mutex};
 
 #[repr(i32)]
-pub enum LoggerLevel {
-    Error = 0,
-    Warn = 1,
-    Info = 2,
-    Debug = 3,
-    Trace = 4,
+pub enum LogLevel {
+    Trace = 0,
+    Debug = 1,
+    Information = 2,
+    Warning = 3,
+    Error = 4,
+    Critical = 5,
+    None = 6
 }
 
-pub type ManagedLoggingCallback = unsafe extern "C" fn(LoggerLevel, *const c_char);
+pub type ManagedLoggingCallback = unsafe extern "C" fn(LogLevel, *const c_char);
 
 pub struct ManagedLogger {
     pub callback: Arc<Mutex<ManagedLoggingCallback>>
@@ -65,13 +67,13 @@ impl ManagedLogger {
             body_text
         );
         let callback = self.callback.lock().unwrap();
-        unsafe { (*callback)(LoggerLevel::Info, marshal::into_raw_c_string(logging_content)); }
+        unsafe { (*callback)(LogLevel::Information, marshal::into_raw_c_string(logging_content)); }
         Ok(())
     }
 
     pub fn log_pinvoke_call(&self, invocation: &str) -> Result<(), String> {
         let callback = self.callback.lock().unwrap();
-        unsafe { (*callback)(LoggerLevel::Info, marshal::into_raw_c_string(format!("{}", invocation))) }
+        unsafe { (*callback)(LogLevel::Information, marshal::into_raw_c_string(format!("{}", invocation))) }
         Ok(())
     }
 

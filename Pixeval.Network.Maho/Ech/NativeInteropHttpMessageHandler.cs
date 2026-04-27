@@ -1,6 +1,3 @@
-using System.Net;
-using System.Text.RegularExpressions;
-
 namespace Pixeval.Network.Maho.Ech;
 
 public class NativeInteropHttpMessageHandler(

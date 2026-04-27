@@ -11,7 +11,6 @@ using Microsoft.Win32.SafeHandles;
 #if WINDOWS_XP_OR_LATER
 using Windows.Win32;
 using Windows.Win32.Foundation;
-using Windows.Win32.Networking.WinSock;
 using Windows.Win32.Security;
 using Windows.Win32.Storage.FileSystem;
 #elif OSX

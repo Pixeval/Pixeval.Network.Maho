@@ -609,3 +609,5 @@ $RECYCLE.BIN/
 /Pixeval.Network.Maho.Test/
 
 # End of https://www.toptal.com/developers/gitignore/api/rust,csharp,intellij+all,rider,windows,macos
+
+**/.idea/**
