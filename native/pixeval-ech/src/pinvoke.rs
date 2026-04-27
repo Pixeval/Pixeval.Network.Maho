@@ -1,5 +1,5 @@
-use std::ffi::{c_char, c_void};
 use crate::marshal;
+use std::ffi::c_char;
 
 #[repr(C)]
 pub struct InteropOperationResult {
@@ -7,7 +7,7 @@ pub struct InteropOperationResult {
     pub error_reason: *const c_char,
 }
 
-impl <T> From<Result<T, String>> for InteropOperationResult {
+impl<T> From<Result<T, String>> for InteropOperationResult {
     fn from(result: Result<T, String>) -> Self {
         match result {
             Ok(_) => InteropOperationResult {
@@ -20,15 +20,6 @@ impl <T> From<Result<T, String>> for InteropOperationResult {
             },
         }
     }
-}
-
-#[repr(i32)]
-pub enum LoggerLevel {
-    Error = 0,
-    Warn = 1,
-    Info = 2,
-    Debug = 3,
-    Trace = 4,
 }
 
 #[repr(C)]

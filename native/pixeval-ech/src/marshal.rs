@@ -1,5 +1,5 @@
-﻿use std::ffi::{c_char, CStr, CString};
-use crate::logging;
+﻿use crate::native_client::NativeClient;
+use std::ffi::{c_char, CStr, CString};
 
 pub fn into_raw_c_string(message: impl Into<String>) -> *const c_char {
     CString::new(message.into()).unwrap().into_raw()
@@ -35,9 +35,14 @@ pub(crate) fn read_c_string(ptr: *const c_char, arg_name: &str) -> Result<&str, 
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn free_c_string(ptr: *const c_char) {
-    logging::log_ffi_call(format!("free_c_string({})", format_ptr(ptr)));
-    if !ptr.is_null() {
-        let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
+pub unsafe extern "C" fn free_c_string(client_handle: *const NativeClient, ptr: *const c_char) {
+    let client_opt = unsafe { client_handle.as_ref() };
+    if let Some(client) = client_opt {
+        client.logger.clone().log_ffi_call(format!("free_c_string({})", format_ptr(ptr)));
+        if !ptr.is_null() {
+            let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
+        }
+    } else {
+        eprintln!("free_c_string called with null client handle. Unable to log the operation. ptr: {}", format_ptr(ptr));
     }
 }

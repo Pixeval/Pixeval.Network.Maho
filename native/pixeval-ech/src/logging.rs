@@ -1,246 +1,94 @@
-use std::ffi::c_char;
-use log::{LevelFilter, info, warn};
+use crate::marshal;
+use log::{warn};
 use reqwest::Method;
 use reqwest::header::HeaderMap;
-use simplelog::{ConfigBuilder, WriteLogger};
-use std::fs::{File, OpenOptions, create_dir_all};
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use crate::marshal;
-use crate::pinvoke::{InteropOperationResult, LoggerLevel};
+use std::ffi::c_char;
+use std::sync::{Arc, Mutex};
 
-pub static CONFIGURED_LOG_FULL_PATH: OnceLock<PathBuf> = OnceLock::new();
-pub static CONFIGURED_LOG_LEVEL: OnceLock<LevelFilter> = OnceLock::new();
-static LOGGER_INIT: OnceLock<Result<(), String>> = OnceLock::new();
-
-const DEFAULT_LOG_FILE_NAME: &str = "http-requests.log";
-
-fn log_file_path() -> PathBuf {
-    if CONFIGURED_LOG_FULL_PATH.get().is_some() {
-        return CONFIGURED_LOG_FULL_PATH.get().unwrap().clone();
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("logs")
-        .join(DEFAULT_LOG_FILE_NAME)
+#[repr(i32)]
+pub enum LoggerLevel {
+    Error = 0,
+    Warn = 1,
+    Info = 2,
+    Debug = 3,
+    Trace = 4,
 }
 
-fn create_file_with_parents(path: impl AsRef<Path>) -> Result<File, std::io::Error> {
-    let path = path.as_ref();
+pub type ManagedLoggingCallback = unsafe extern "C" fn(LoggerLevel, *const c_char);
 
-    if let Some(parent) = path.parent() {
-        create_dir_all(parent)?;
-    }
-
-    File::create(path)
+pub struct ManagedLogger {
+    pub callback: Arc<Mutex<ManagedLoggingCallback>>
 }
 
-fn log_level() -> LevelFilter {
-    CONFIGURED_LOG_LEVEL
-        .get()
-        .copied()
-        .unwrap_or(LevelFilter::Info)
-}
+impl ManagedLogger {
+    pub fn log_http_request(
+        &self,
+        request_id: u64,
+        method: &Method,
+        url: &str,
+        headers: &HeaderMap,
+        body: &[u8],
+    ) -> Result<(), String> {
+        let formatted_headers = if headers.is_empty() {
+            String::from("<none>")
+        } else {
+            headers
+                .iter()
+                .map(|(name, value)| {
+                    let value = value.to_str().unwrap_or("<non-utf8 header value>");
+                    format!("{}: {}", name.as_str(), value)
+                })
+                .collect::<Vec<String>>()
+                .join("\n")
+        };
 
-pub fn set_configured_logger_path(full_path: &str) -> Result<(), String> {
-    let path = Path::new(full_path);
-    if !path.exists() {
-        create_file_with_parents(path)
-            .map_err(|e| format!("Failed to create logger directory: {}", e))?;
-    }
-    CONFIGURED_LOG_FULL_PATH
-        .set(path.to_path_buf())
-        .map_err(|_| String::from("Logger path has already been set and cannot be changed"))?;
-    Ok(())
-}
-
-pub fn set_configured_log_level(level: LevelFilter) -> Result<(), String> {
-    if let Some(existing) = CONFIGURED_LOG_LEVEL.get() {
-        if *existing == level {
-            return Ok(());
-        }
-
-        return Err(String::from(
-            "Logger level has already been set and cannot be changed",
-        ));
-    }
-
-    CONFIGURED_LOG_LEVEL
-        .set(level)
-        .map_err(|_| String::from("Logger level has already been set and cannot be changed"))?;
-
-    Ok(())
-}
-
-pub(crate) fn init_logger() -> Result<(), String> {
-    LOGGER_INIT
-        .get_or_init(logger_initializer)
-        .as_ref()
-        .map(|_| ())
-        .map_err(|err| err.clone())
-}
-
-pub fn is_logger_initialized() -> bool {
-    LOGGER_INIT.get().is_some()
-}
-
-pub fn has_logger_configuration() -> bool {
-    CONFIGURED_LOG_FULL_PATH.get().is_some() || CONFIGURED_LOG_LEVEL.get().is_some()
-}
-
-fn logger_initializer() -> Result<(), String> {
-    let log_path = log_file_path();
-    if let Some(parent) = log_path.parent() {
-        create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create log directory {}: {}",
-                parent.display(),
-                err
-            )
-        })?;
-    }
-
-    let log_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .map_err(|err| format!("failed to open log file {}: {}", log_path.display(), err))?;
-
-    let config = ConfigBuilder::new().set_time_format_rfc3339().build();
-
-    WriteLogger::init(log_level(), config, log_file)
-        .map_err(|err| format!("failed to initialize logger: {}", err))
-}
-
-pub fn log_http_request(
-    request_id: u64,
-    method: &Method,
-    url: &str,
-    headers: &HeaderMap,
-    body: &[u8],
-) -> Result<(), String> {
-    init_logger()?;
-
-    let formatted_headers = if headers.is_empty() {
-        String::from("<none>")
-    } else {
-        headers
-            .iter()
-            .map(|(name, value)| {
-                let value = value.to_str().unwrap_or("<non-utf8 header value>");
-                format!("{}: {}", name.as_str(), value)
-            })
-            .collect::<Vec<String>>()
-            .join("\n")
-    };
-
-    let body_text = if body.is_empty() {
-        String::from("<empty>")
-    } else {
-        match std::str::from_utf8(body) {
-            Ok(text) => text.to_owned(),
-            Err(err) => format!(
-                "<invalid utf-8: {}; lossy={}>",
-                err,
-                String::from_utf8_lossy(body)
-            ),
-        }
-    };
-
-    info!(
-        "Outgoing HTTP request\nrequest_id: {}\nmethod: {}\nurl: {}\nheaders:\n{}\nbody_len: {}\nbody_utf8:\n{}",
-        request_id,
-        method,
-        url,
-        formatted_headers,
-        body.len(),
-        body_text
-    );
-
-    Ok(())
-}
-
-pub fn log_pinvoke_call(invocation: &str) -> Result<(), String> {
-    init_logger()?;
-    info!("{}", invocation);
-    Ok(())
-}
-
-pub fn log_managed_error(target: &str, error: &str) -> Result<(), String> {
-    init_logger()?;
-    warn!("{} -> managed error: {}", target, error);
-    Ok(())
-}
-
-pub fn log_ffi_error(target: &str, error: impl AsRef<str>) {
-    if let Err(err) = log_managed_error(target, error.as_ref()) {
-        eprintln!("Failed to log managed-facing error: {}", err);
-    }
-}
-
-pub fn log_ffi_call(invocation: impl AsRef<str>) {
-    if let Err(err) = log_pinvoke_call(invocation.as_ref()) {
-        eprintln!("Failed to log P/Invoke call: {}", err);
-    }
-}
-
-fn logger_configuration_error(error: impl Into<String>) -> InteropOperationResult {
-    let error = error.into();
-    if is_logger_initialized() || has_logger_configuration() {
-        log_ffi_error("InteropOperationResult", &error);
-    } else {
-        eprintln!("InteropOperationResult -> managed error: {}", error);
-    }
-    InteropOperationResult {
-        success: false,
-        error_reason: marshal::into_raw_c_string(error),
-    }
-}
-
-
-#[unsafe(no_mangle)]
-pub extern "C" fn configure_logger_path(path: *const c_char) -> InteropOperationResult {
-    let invocation = format!("configure_logger_path({})", marshal::format_c_string_arg(path));
-    if path.is_null() {
-        return logger_configuration_error("Log file path pointer is null");
-    }
-
-    match marshal::read_c_string(path, "Log file path") {
-        Ok(path) => match set_configured_logger_path(path) {
-            Ok(_) => {
-                log_ffi_call(invocation);
-                InteropOperationResult {
-                    success: true,
-                    error_reason: std::ptr::null(),
-                }
+        let body_text = if body.is_empty() {
+            String::from("<empty>")
+        } else {
+            match std::str::from_utf8(body) {
+                Ok(text) => text.to_owned(),
+                Err(err) => format!(
+                    "<invalid utf-8: {}; lossy={}>",
+                    err,
+                    String::from_utf8_lossy(body)
+                ),
             }
-            Err(err) => logger_configuration_error(err),
-        },
-        Err(err) => logger_configuration_error(err),
+        };
+
+        let logging_content = format!(
+            "Outgoing HTTP request\nrequest_id: {}\nmethod: {}\nurl: {}\nheaders:\n{}\nbody_len: {}\nbody_utf8:\n{}",
+            request_id,
+            method,
+            url,
+            formatted_headers,
+            body.len(),
+            body_text
+        );
+        let callback = self.callback.lock().unwrap();
+        unsafe { (*callback)(LoggerLevel::Info, marshal::into_raw_c_string(logging_content)); }
+        Ok(())
     }
-}
 
-#[unsafe(no_mangle)]
-pub extern "C" fn configure_logger_level(level: i32) -> InteropOperationResult {
-    let invocation = format!("configure_logger_level({})", level);
-    let level = match level {
-        x if x == LoggerLevel::Error as i32 => log::LevelFilter::Error,
-        x if x == LoggerLevel::Warn as i32 => log::LevelFilter::Warn,
-        x if x == LoggerLevel::Info as i32 => log::LevelFilter::Info,
-        x if x == LoggerLevel::Debug as i32 => log::LevelFilter::Debug,
-        x if x == LoggerLevel::Trace as i32 => log::LevelFilter::Trace,
-        _ => {
-            return logger_configuration_error(format!("Invalid logger level value: {}", level));
-        }
-    };
+    pub fn log_pinvoke_call(&self, invocation: &str) -> Result<(), String> {
+        let callback = self.callback.lock().unwrap();
+        unsafe { (*callback)(LoggerLevel::Info, marshal::into_raw_c_string(format!("{}", invocation))) }
+        Ok(())
+    }
 
-    match set_configured_log_level(level) {
-        Ok(_) => {
-            log_ffi_call(invocation);
-            InteropOperationResult {
-                success: true,
-                error_reason: std::ptr::null(),
-            }
+    pub fn log_managed_error(&self, target: &str, error: &str) -> Result<(), String> {
+        warn!("{} -> managed error: {}", target, error);
+        Ok(())
+    }
+
+    pub fn log_ffi_error(&self, target: &str, error: impl AsRef<str>) {
+        if let Err(err) = self.log_managed_error(target, error.as_ref()) {
+            eprintln!("Failed to log managed-facing error: {}", err);
         }
-        Err(err) => logger_configuration_error(err),
+    }
+
+    pub fn log_ffi_call(&self, invocation: impl AsRef<str>) {
+        if let Err(err) = self.log_pinvoke_call(invocation.as_ref()) {
+            eprintln!("Failed to log P/Invoke call: {}", err);
+        }
     }
 }

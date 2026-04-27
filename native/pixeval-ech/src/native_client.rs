@@ -1,11 +1,9 @@
-﻿#![allow(E0133)]
-
-use crate::async_runtime::ffi_runtime;
-use crate::logging::{log_ffi_error, log_http_request};
+﻿use crate::async_runtime::ffi_runtime;
+use crate::logging::{ManagedLogger, ManagedLoggingCallback};
 use crate::pinvoke::{FFIHttpRequestMessage, FFIHttpResponseMessage};
 use crate::resolution::{DelegatedResolver, ManagedDnsResolutionCallback};
 use crate::util::format_error;
-use crate::{client_builder, logging, marshal};
+use crate::{client_builder, marshal};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Method;
 use std::collections::HashMap;
@@ -17,7 +15,8 @@ use std::sync::{Arc, Mutex};
 
 pub struct NativeClient {
     pub client: reqwest::Client,
-    pub resolver: Arc<DelegatedResolver>
+    pub resolver: Arc<DelegatedResolver>,
+    pub logger: Arc<ManagedLogger>
 }
 
 pub enum RequestError {
@@ -41,6 +40,7 @@ pub type HttpCompletionCallback = extern "C" fn(id: u64, response: FFIHttpRespon
 pub unsafe extern "C" fn begin_create_client(
     dns_server: *const c_char,
     dns_callback: ManagedDnsResolutionCallback,
+    logger_callback: ManagedLoggingCallback,
     client_creation_callback: ClientCreationCallback,
 ) {
     if dns_server.is_null() {
@@ -61,11 +61,17 @@ pub unsafe extern "C" fn begin_create_client(
         dns_url: String::from(dns_server_n)
     };
     let resolver_arc = Arc::new(resolver);
+
+    let logger = ManagedLogger {
+        callback: Arc::new(Mutex::new(logger_callback)),
+    };
+    let logger_arc = Arc::new(logger);
+
     ffi_runtime().spawn(async move {
         let client_res = client_builder::build_ech_client(resolver_arc.clone()).await;
         match client_res {
             Ok(client) => {
-                let heap_allocated_native_client = Box::new(NativeClient { client, resolver: resolver_arc });
+                let heap_allocated_native_client = Box::new(NativeClient { client, resolver: resolver_arc, logger: logger_arc });
                 client_creation_callback(true, Box::into_raw(heap_allocated_native_client), std::ptr::null());
             }
             Err(e) => {
@@ -86,17 +92,20 @@ pub extern "C" fn free_client(client_handle: *const NativeClient) {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn free_response(response: FFIHttpResponseMessage) {
-    logging::log_ffi_call(format!(
-        "free_response(FFIHttpResponseMessage {{ premature_death: {}, premature_death_reason: {}, status_code: {}, headers: {}, headers_len: {}, body: {}, body_len: {} }})",
-        response.premature_death,
-        marshal::format_ptr(response.premature_death_reason),
-        response.status_code,
-        marshal::format_ptr(response.headers),
-        response.headers_len,
-        marshal::format_ptr(response.body),
-        response.body_len
-    ));
+pub unsafe extern "C" fn free_response(client_handle: *const NativeClient, response: FFIHttpResponseMessage) {
+    if let Some(client) = unsafe { client_handle.as_ref() } {
+        client.logger.log_ffi_call(format!(
+            "free_response(FFIHttpResponseMessage {{ premature_death: {}, premature_death_reason: {}, status_code: {}, headers: {}, headers_len: {}, body: {}, body_len: {} }})",
+            response.premature_death,
+            marshal::format_ptr(response.premature_death_reason),
+            response.status_code,
+            marshal::format_ptr(response.headers),
+            response.headers_len,
+            marshal::format_ptr(response.body),
+            response.body_len
+        ));
+    }
+
     if !response.premature_death_reason.is_null() {
         let _ = unsafe { CString::from_raw(response.premature_death_reason as *mut c_char) };
     }
@@ -126,8 +135,8 @@ unsafe extern "C" fn send_request(
     callback: HttpCompletionCallback,
     user_data: *mut c_void,
 ) {
-    unsafe {
-        logging::log_ffi_call(format!(
+    if let Some(client) = unsafe { native_client.as_ref() } {
+        client.logger.log_ffi_call(format!(
             "send_request(FFIHttpRequestMessage {{ request_id: {}, url: {}, method: {}, headers: {}, headers_len: {}, body: {}, body_len: {} }}, {:p}, {})",
             request_message.request_id,
             marshal::format_c_string_arg(request_message.url),
@@ -139,49 +148,50 @@ unsafe extern "C" fn send_request(
             callback as *const (),
             marshal::format_mut_ptr(user_data)
         ));
-        let url = match marshal::read_c_string(request_message.url, "request_message.url") {
-            Ok(url) => String::from(url),
+    }
+
+    let url = match marshal::read_c_string(request_message.url, "request_message.url") {
+        Ok(url) => String::from(url),
+        Err(err) => {
+            let response = ffi_error_response(err);
+            callback(request_message.request_id, response, user_data);
+            return;
+        }
+    };
+    let header_map = match unsafe { parse_request_headers(request_message.headers, request_message.headers_len) } {
+        Ok(header_map) => header_map,
+        Err(err) => {
+            callback(
+                request_message.request_id,
+                ffi_error_response(format!("Invalid HTTP headers: {}", err)),
+                user_data,
+            );
+            return;
+        }
+    };
+    let method =
+        match marshal::read_c_string(request_message.method, "request_message.method").and_then(|method| {
+            Method::from_str(method).map_err(|_| String::from("Invalid HTTP method"))
+        }) {
+            Ok(method) => method,
             Err(err) => {
                 let response = ffi_error_response(err);
                 callback(request_message.request_id, response, user_data);
                 return;
             }
         };
-        let header_map = match parse_request_headers(request_message.headers, request_message.headers_len) {
-            Ok(header_map) => header_map,
-            Err(err) => {
-                callback(
-                    request_message.request_id,
-                    ffi_error_response(format!("Invalid HTTP headers: {}", err)),
-                    user_data,
-                );
-                return;
-            }
-        };
-        let method =
-            match marshal::read_c_string(request_message.method, "request_message.method").and_then(|method| {
-                Method::from_str(method).map_err(|_| String::from("Invalid HTTP method"))
-            }) {
-                Ok(method) => method,
-                Err(err) => {
-                    let response = ffi_error_response(err);
-                    callback(request_message.request_id, response, user_data);
-                    return;
-                }
-            };
-        let request_id = request_message.request_id;
-        let body = std::slice::from_raw_parts(request_message.body, request_message.body_len).to_vec();
-        let user_data_safe = user_data as usize;
-        match native_client.as_ref() {
-            None => {
-                callback(request_message.request_id, ffi_error_response("Invalid client handle pointer"), user_data);
-            }
-            Some(inner) => {
-                ffi_runtime().spawn(async move {
-                    let resp = inner.send_request_wrapped(request_id, url, method, header_map, body).await;
-                    callback(request_id, resp, user_data_safe as *mut c_void)
-                });
-            }
+    let request_id = request_message.request_id;
+    let body = unsafe { std::slice::from_raw_parts(request_message.body, request_message.body_len).to_vec() };
+    let user_data_safe = user_data as usize;
+    match unsafe { native_client.as_ref() } {
+        None => {
+            callback(request_message.request_id, ffi_error_response("Invalid client handle pointer"), user_data);
+        }
+        Some(inner) => {
+            ffi_runtime().spawn(async move {
+                let resp = inner.send_request_wrapped(request_id, url, method, header_map, body).await;
+                callback(request_id, resp, user_data_safe as *mut c_void)
+            });
         }
     }
 }
@@ -233,7 +243,7 @@ impl NativeClient {
         headers: HeaderMap,
         body: Vec<u8>,
     ) -> Result<reqwest::Response, RequestError> {
-        if let Err(err) = log_http_request(request_id, &method, &url, &headers, &body) {
+        if let Err(err) = self.logger.log_http_request(request_id, &method, &url, &headers, &body) {
             eprintln!("Failed to log outbound request {}: {}", request_id, err);
         }
 
@@ -297,7 +307,6 @@ impl NativeClient {
 
 fn ffi_error_response(message: impl Into<String>) -> FFIHttpResponseMessage {
     let message = message.into();
-    log_ffi_error("FFIHttpResponseMessage", &message);
     FFIHttpResponseMessage {
         premature_death: true,
         premature_death_reason: marshal::into_raw_c_string(message),

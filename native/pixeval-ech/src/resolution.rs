@@ -1,5 +1,6 @@
+use crate::marshal;
 use crate::native_client::NativeClient;
-use crate::util::format_error;
+use crate::pinvoke::InteropOperationResult;
 use anyhow::anyhow;
 use reqwest::dns::{Addrs, Resolve};
 use std::ffi::{c_char, CStr, CString};
@@ -10,8 +11,6 @@ use std::{
     net::{IpAddr, SocketAddr}
 };
 use tokio::sync::oneshot::{self, Sender};
-use crate::marshal;
-use crate::pinvoke::InteropOperationResult;
 
 pub type ManagedDnsResolutionCallback = unsafe extern "C" fn(i64, *const c_char);
 
@@ -22,7 +21,7 @@ pub unsafe extern "C" fn complete_resolution(
     ip_str: *const *const c_char,
     ip_len: usize,
 ) -> InteropOperationResult {
-    let client_res = native_client.as_ref().ok_or_else(|| "native_client is null".to_string());
+    let client_res = unsafe { native_client.as_ref() }.ok_or_else(|| "native_client is null".to_string());
     if client_res.is_err() {
         return InteropOperationResult::from(client_res);
     }
@@ -59,7 +58,7 @@ pub unsafe extern "C" fn complete_resolution_failure(
     request_id: i64,
     err_reason: *const c_char) -> InteropOperationResult
 {
-    let client_res = native_client.as_ref().ok_or_else(|| "native_client is null".to_string());
+    let client_res = unsafe { native_client.as_ref() }.ok_or_else(|| "native_client is null".to_string());
     if client_res.is_err() {
         return InteropOperationResult::from(client_res);
     }

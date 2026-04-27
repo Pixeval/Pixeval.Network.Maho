@@ -60,14 +60,15 @@ public static partial class NativeClient
     [LibraryImport("pixeval_ech")]
     public static partial void begin_create_client(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string dnsServer,
-        Resolution.ManagedDnsResolutionCallback managedDnsResolutionCallback,
+        ManagedDnsResolutionCallback managedDnsResolutionCallback,
+        ManagedLoggingCallback managedLoggingCallback,
         ClientCreationCallback callback);
 
     [LibraryImport("pixeval_ech")]
     public static partial void free_client(nint clientHandle);
 
     [LibraryImport("pixeval_ech")]
-    public static partial void free_response(FFIHttpResponseMessage response);
+    public static partial void free_response(nint clientHandle, FFIHttpResponseMessage response);
     
     [LibraryImport("pixeval_ech")]
     public static partial void send_request(

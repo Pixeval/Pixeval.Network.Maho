@@ -7,25 +7,16 @@ using Pixeval.Network.Maho.Ech.Interop;
 
 namespace Pixeval.Network.Maho.Ech;
 
-public class NativeClient(IDnsResolver dnsResolver) : IDisposable
+public class NativeClient(INativeInteropDnsResolver dnsResolver, INativeInteropLogger logger) : IDisposable
 {
     private int _requestIdCounter;
 
     private nint _nativeClientHandle;
 
     public bool Initialized { get; private set; }
-
-    public static void SetLoggerLevel(LoggerLevel level)
-    {
-        var result = Logging.configure_logger_level(level);
-        if (result.Success != 1)
-        {
-            throw new InvalidOperationException($"Failed to set the native client logger level: {result.ErrorReason}");
-        }
-    }
     
     [MethodImpl(MethodImplOptions.Synchronized)]
-    public Task InitClientAsync(string dnsResolutionUrl, string logPath = "")
+    public Task InitClientAsync()
     {
         if (Initialized)
         {
@@ -33,16 +24,8 @@ public class NativeClient(IDnsResolver dnsResolver) : IDisposable
         }
 
         Initialized = true;
-        if (logPath != string.Empty)
-        {
-            var result = Logging.configure_logger_path(logPath);
-            if (result.Success != 1)
-            {
-                throw new InvalidOperationException($"Failed to set the native client logger path: {result.ErrorReason}");
-            }
-        }
         var taskCompletionSource = new TaskCompletionSource();
-        Interop.NativeClient.begin_create_client(dnsResolutionUrl, ManagedDnsResolutionCallback, (success, handle) =>
+        Interop.NativeClient.begin_create_client(dnsResolver.BaseResolutionUrl, ManagedDnsResolutionCallback, ManagedLoggingCallback, (success, handle) =>
         {
             if (!success)
             {
@@ -57,7 +40,12 @@ public class NativeClient(IDnsResolver dnsResolver) : IDisposable
 
         return taskCompletionSource.Task;
     }
-    
+
+    private void ManagedLoggingCallback(LoggerLevel level, string message)
+    {
+        logger.Log(level, message);
+    }
+
     // ReSharper disable once AsyncVoidMethod
     private async void ManagedDnsResolutionCallback(long requestToken, string hostname)
     {
@@ -78,6 +66,8 @@ public class NativeClient(IDnsResolver dnsResolver) : IDisposable
             Console.WriteLine(Marshal.PtrToStringUTF8(interopResult.ErrorReason));
         }
     }
+    
+    
 
     private static unsafe nint MarshalIpAddresses(IReadOnlyList<IPAddress> addresses)
     {
@@ -103,7 +93,7 @@ public class NativeClient(IDnsResolver dnsResolver) : IDisposable
         var result = ffiResponse.PrematureDeath != 0
             ? throw new HttpRequestException($"Request failed prematurely: {Marshal.PtrToStringUTF8(ffiResponse.PrematureDeathReason)}") 
             : UnmarshalHttpResponseMessage(ffiResponse);
-        Interop.NativeClient.free_response(ffiResponse);
+        Interop.NativeClient.free_response(_nativeClientHandle, ffiResponse);
         return result;
     }
 

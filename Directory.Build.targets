@@ -79,7 +79,8 @@
             Condition="'$(RustTarget)' != ''">
         <Message Importance="high" Text="Commencing the building of ech native library" />
         <Exec WorkingDirectory="$(NativeProjectDirectory)"
-              Command="cargo build --target $(RustTarget) $(CargoBuildFlag)" />
+              Command="cargo build --target $(RustTarget) $(CargoBuildFlag)" 
+              IgnoreStandardErrorWarningFormat="true"/>
         <Copy SourceFiles="$(NativeBuildOutputFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     </Target>
 </Project>
