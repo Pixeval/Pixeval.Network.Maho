@@ -10,31 +10,49 @@ namespace Pixeval.Network.Maho.Ech;
 
 public class NativeClient(INativeInteropDnsResolver dnsResolver, INativeInteropLogger logger) : IDisposable
 {
+    private readonly Lock _initializationLock = new();
     private int _requestIdCounter;
+    private Task? _initializationTask;
 
     private nint _nativeClientHandle;
 
     public bool Initialized { get; private set; }
     
-    [MethodImpl(MethodImplOptions.Synchronized)]
     public Task InitClientAsync()
     {
-        if (Initialized)
+        lock (_initializationLock)
         {
-            return Task.CompletedTask;
-        }
+            if (Initialized)
+            {
+                return Task.CompletedTask;
+            }
 
-        Initialized = true;
-        var taskCompletionSource = new TaskCompletionSource();
+            return _initializationTask ??= InitClientCoreAsync();
+        }
+    }
+
+    private Task InitClientCoreAsync()
+    {
+        var taskCompletionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Interop.NativeClient.begin_create_client(dnsResolver.BaseResolutionUrl, ManagedDnsResolutionCallback, ManagedLoggingCallback, (success, handle) =>
         {
             if (!success)
             {
+                lock (_initializationLock)
+                {
+                    _initializationTask = null;
+                }
+
                 taskCompletionSource.SetException(new InvalidOperationException("Failed to create native client"));
             }
             else
             {
-                _nativeClientHandle = handle;
+                lock (_initializationLock)
+                {
+                    _nativeClientHandle = handle;
+                    Initialized = true;
+                }
+
                 taskCompletionSource.SetResult();
             }
         });
@@ -63,8 +81,7 @@ public class NativeClient(INativeInteropDnsResolver dnsResolver, INativeInteropL
 
         if (interopResult.Success != 1)
         {
-            // TODO log the error
-            Console.WriteLine(Marshal.PtrToStringUTF8(interopResult.ErrorReason));
+            logger.Log(LogLevel.Error, Marshal.PtrToStringUTF8(interopResult.ErrorReason) ?? "");
         }
     }
     
@@ -78,7 +95,7 @@ public class NativeClient(INativeInteropDnsResolver dnsResolver, INativeInteropL
             *(pAddresses + j) = AllocateUtf8CString(addresses[j].ToString());
         }
 
-        return new nint(pAddresses);
+        return (nint) pAddresses;
     }
 
     public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
@@ -193,6 +210,11 @@ public class NativeClient(INativeInteropDnsResolver dnsResolver, INativeInteropL
         if (_nativeClientHandle != nint.Zero)
         {
             Interop.NativeClient.free_client(_nativeClientHandle);
+            _nativeClientHandle = nint.Zero;
         }
+
+        _initializationTask = null;
+        Initialized = false;
+        GC.SuppressFinalize(this);
     }
 }
