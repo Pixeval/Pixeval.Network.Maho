@@ -1,9 +1,9 @@
 namespace Pixeval.Network.Maho.Ech;
 
-public static class NativeInteropEchEnabledHttpClientFactory
+public static class NativeInteropEchEnabledHttpMessageHandlerFactory
 {
-    public static HttpClient GetNativeInteropEchEnabledClient(INativeInteropDnsResolver dnsResolver, INativeInteropLogger logger)
+    public static HttpMessageHandler GetNativeInteropEchEnabledHandler(INativeInteropDnsResolver dnsResolver, INativeInteropLogger logger)
     {
-        return new HttpClient(new NativeInteropHttpMessageHandler(dnsResolver, logger));
+        return new NativeInteropHttpMessageHandler(dnsResolver, logger);
     }
 }

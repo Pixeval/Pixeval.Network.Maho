@@ -4,5 +4,5 @@ namespace Pixeval.Network.Maho;
 
 public interface IDnsResolver
 {
-    Task<IPAddress[]> ResolveAsync(string hostname);
+    Task<IPAddress[]> LookupAsync(string hostname);
 }

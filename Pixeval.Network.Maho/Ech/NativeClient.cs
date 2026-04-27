@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Pixeval.Network.Maho.Ech.Interop;
 
 namespace Pixeval.Network.Maho.Ech;
@@ -41,7 +42,7 @@ public class NativeClient(INativeInteropDnsResolver dnsResolver, INativeInteropL
         return taskCompletionSource.Task;
     }
 
-    private void ManagedLoggingCallback(LoggerLevel level, string message)
+    private void ManagedLoggingCallback(LogLevel level, string message)
     {
         logger.Log(level, message);
     }

@@ -2,9 +2,9 @@ using System.Net.Sockets;
 
 namespace Pixeval.Network.Maho.Desync;
 
-public static class DesynchronizationHttpClientFactory
+public static class DesynchronizationSocketsHttpHandlerFactory
 {
-    public static HttpClient GetDesynchronizationHttpClient(
+    public static SocketsHttpHandler GetDesynchronizationHandler(
         int realSendSleepMs,
         int socketTimeoutMs, 
         string fakeHttpContent,
@@ -13,11 +13,11 @@ public static class DesynchronizationHttpClientFactory
         ITtlSpoofStrategy tltSpoofer,
         IDnsResolver dnsResolver)
     {
-        return new HttpClient(new SocketsHttpHandler
+        return new SocketsHttpHandler
         {
             ConnectCallback = ConnectCallback,
             UseProxy = false
-        });
+        };
 
         async ValueTask<Stream> ConnectCallback(SocketsHttpConnectionContext ctx, CancellationToken cancellationToken)
         {
@@ -25,7 +25,7 @@ public static class DesynchronizationHttpClientFactory
             {
                 NoDelay = true
             };
-            await socket.ConnectAsync(await dnsResolver.ResolveAsync(ctx.DnsEndPoint.Host), ctx.DnsEndPoint.Port, cancellationToken);
+            await socket.ConnectAsync(await dnsResolver.LookupAsync(ctx.DnsEndPoint.Host), ctx.DnsEndPoint.Port, cancellationToken);
             var networkStream = new NetworkStream(socket, true);
             return new DesynchronizationWrapperStream(
                 networkStream,
