@@ -114,4 +114,17 @@
               DestinationFolder="$(OutDir)"
               SkipUnchangedFiles="true" />
     </Target>
+
+    <Target Name="AddNativeLibraryToCopyOutputItems"
+            BeforeTargets="GetCopyToOutputDirectoryItems;_GetCopyToOutputDirectoryItemsFromThisProject"
+            DependsOnTargets="BuildNative"
+            Condition="'$(RustTarget)' != ''">
+        <ItemGroup>
+            <ContentWithTargetPath Include="$(OutDir)$(RustBuildPrefix)$(NativeProjectCrateName).$(RustBuildExtension)">
+                <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+                <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+                <TargetPath>$(RustBuildPrefix)$(NativeProjectCrateName).$(RustBuildExtension)</TargetPath>
+            </ContentWithTargetPath>
+        </ItemGroup>
+    </Target>
 </Project>
