@@ -608,6 +608,10 @@ $RECYCLE.BIN/
 # Local test app
 /Pixeval.Network.Maho.Test/
 
+# Prebuilt native libraries used when Cargo is unavailable.
+!native/prebuilt/
+!native/prebuilt/**
+
 # End of https://www.toptal.com/developers/gitignore/api/rust,csharp,intellij+all,rider,windows,macos
 
 **/.idea/**

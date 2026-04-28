@@ -1,6 +1,6 @@
 <Project>
     <PropertyGroup>
-        <NativeProjectDirectory>$(MSBuildThisFileDirectory)/native/pixeval-ech</NativeProjectDirectory>
+        <NativeProjectDirectory>$(MSBuildThisFileDirectory)native/pixeval-ech</NativeProjectDirectory>
         <NativeProjectCrateName>pixeval_ech</NativeProjectCrateName>
         <NativeRuntimeIdentifier Condition="'$(NativeRuntimeIdentifier)' == '' and '$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</NativeRuntimeIdentifier>
         <NativeHostArchitecture>$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)</NativeHostArchitecture>
@@ -72,15 +72,46 @@
     <PropertyGroup>
         <NativeBuildOutputDirectory>$(NativeProjectDirectory)/target/$(RustTarget)/$(RustProfile)</NativeBuildOutputDirectory>
         <NativeBuildOutputFile>$(NativeBuildOutputDirectory)/$(RustBuildPrefix)$(NativeProjectCrateName).$(RustBuildExtension)</NativeBuildOutputFile>
+        <NativePrebuiltDirectory>$(MSBuildThisFileDirectory)native/prebuilt/$(NativeRuntimeIdentifier)</NativePrebuiltDirectory>
+        <NativePrebuiltOutputFile>$(NativePrebuiltDirectory)/$(RustBuildPrefix)$(NativeProjectCrateName).$(RustBuildExtension)</NativePrebuiltOutputFile>
     </PropertyGroup>
 
     <Target Name="BuildNative"
             BeforeTargets="Build"
             Condition="'$(RustTarget)' != ''">
-        <Message Importance="high" Text="Commencing the building of ech native library" />
-        <Exec WorkingDirectory="$(NativeProjectDirectory)"
-              Command="cargo build --target $(RustTarget) $(CargoBuildFlag)" 
-              IgnoreStandardErrorWarningFormat="true"/>
-        <Copy SourceFiles="$(NativeBuildOutputFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+        <Exec Command="cargo --version"
+              IgnoreExitCode="true"
+              IgnoreStandardErrorWarningFormat="true"
+              StandardOutputImportance="low"
+              StandardErrorImportance="low">
+            <Output TaskParameter="ExitCode" PropertyName="CargoProbeExitCode" />
+        </Exec>
+
+        <PropertyGroup>
+            <CargoAvailable Condition="'$(CargoProbeExitCode)' == '0'">true</CargoAvailable>
+            <CargoAvailable Condition="'$(CargoAvailable)' == ''">false</CargoAvailable>
+        </PropertyGroup>
+
+        <Message Condition="'$(CargoAvailable)' == 'true'"
+                 Importance="high"
+                 Text="Commencing the building of ech native library" />
+        <Exec Condition="'$(CargoAvailable)' == 'true'"
+              WorkingDirectory="$(NativeProjectDirectory)"
+              Command="cargo build --target $(RustTarget) $(CargoBuildFlag)"
+              IgnoreStandardErrorWarningFormat="true" />
+        <Copy Condition="'$(CargoAvailable)' == 'true'"
+              SourceFiles="$(NativeBuildOutputFile)"
+              DestinationFolder="$(OutDir)"
+              SkipUnchangedFiles="true" />
+
+        <Message Condition="'$(CargoAvailable)' != 'true'"
+                 Importance="high"
+                 Text="Cargo is unavailable; using prebuilt native library: $(NativePrebuiltOutputFile)" />
+        <Error Condition="'$(CargoAvailable)' != 'true' and !Exists('$(NativePrebuiltOutputFile)')"
+               Text="Cargo is unavailable and the prebuilt native library does not exist: $(NativePrebuiltOutputFile)" />
+        <Copy Condition="'$(CargoAvailable)' != 'true'"
+              SourceFiles="$(NativePrebuiltOutputFile)"
+              DestinationFolder="$(OutDir)"
+              SkipUnchangedFiles="true" />
     </Target>
 </Project>
