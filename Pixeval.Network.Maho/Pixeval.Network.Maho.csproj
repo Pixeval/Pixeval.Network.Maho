@@ -5,10 +5,15 @@
 		<Nullable>enable</Nullable>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<LangVersion>latest</LangVersion>
+		<UseECH Condition="'$(UseECH)' == ''">false</UseECH>
 		<UseDesync Condition="'$(UseDesync)' == ''">false</UseDesync>
+		<ImportDirectoryBuildTargets Condition="'$(UseECH)' != 'true'">false</ImportDirectoryBuildTargets>
 	</PropertyGroup>
 	<ItemGroup>
 		<RuntimeHostConfigurationOption Value="true" Include="System.Net.SocketsHttpHandler.Http3Support" />
+	</ItemGroup>
+	<ItemGroup Condition="'$(UseECH)' != 'true'">
+		<Compile Remove="ECH\**\*" />
 	</ItemGroup>
 	<ItemGroup Condition="'$(UseDesync)' != 'true'">
 		<Compile Remove="Desync\**\*" />
