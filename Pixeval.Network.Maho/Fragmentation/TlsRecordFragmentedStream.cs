@@ -6,7 +6,7 @@ namespace Pixeval.Network.Maho.Fragmentation;
 
 public class TlsRecordFragmentedStream(Stream innerStream) : Stream
 {
-    private ClientHelloStateMachine _stateMachine;
+    private ClientHelloStateMachine _stateMachine = new();
     private const int ClientHelloTlsRecordHeaderLength = 5;
 
     private async Task WriteAsyncInternal(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
@@ -18,14 +18,14 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
 
         if (_stateMachine.Completed)
         {
-            await innerStream.WriteAsync(buffer.AsMemory(offset, count), cancellationToken);
+            await innerStream.WriteAsync(buffer.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
             return;
         }
 
         switch (_stateMachine.FlowState(buffer, offset, count, out var packet, out var rmnOffset, out var rmnSize))
         {
             case ClientHelloPacketCollectingState.Idle:
-                await innerStream.WriteAsync(buffer.AsMemory(offset, count), cancellationToken);
+                await innerStream.WriteAsync(buffer.AsMemory(offset, count), cancellationToken).ConfigureAwait(false);
                 break;
             case ClientHelloPacketCollectingState.CollectingHeader:
             case ClientHelloPacketCollectingState.Collecting:
@@ -36,7 +36,7 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
                     await SplitTlsRecordAndSendAsync(p.Memory, cancellationToken).ConfigureAwait(false);
                     if (rmnOffset > 0 && rmnSize > 0)
                     {
-                        await innerStream.WriteAsync(buffer.AsMemory(rmnOffset, rmnSize), cancellationToken);
+                        await innerStream.WriteAsync(buffer.AsMemory(rmnOffset, rmnSize), cancellationToken).ConfigureAwait(false);
                     }
                 }
                 break;
@@ -77,23 +77,21 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
         return WriteAsyncInternal(buffer, offset, count, cancellationToken);
     }
 
-    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return ValueTask.FromCanceled(cancellationToken);
-        }
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (MemoryMarshal.TryGetArray(buffer, out var segment) && segment.Array is not null)
         {
-            return new ValueTask(WriteAsync(segment.Array, segment.Offset, segment.Count, cancellationToken));
+            await WriteAsync(segment.Array, segment.Offset, segment.Count, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         var rented = ArrayPool<byte>.Shared.Rent(buffer.Length);
         try
         {
             buffer.Span.CopyTo(rented);
-            return new ValueTask(WriteAsync(rented, 0, buffer.Length, cancellationToken));
+            await WriteAsync(rented, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -106,7 +104,7 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
         var locator = new ServerNameLocator(originalClientHelloPacket.Span);
         if (locator.TryLocateServerName(out var result) is ServerNameLocatingResult.Located)
         {
-            var cuts = result.SelectMany(loc => new[] { loc.hostnameStart, loc.hostnameStart + loc.hostnameLength / 2})
+            var cuts = result.SelectMany(static loc => new[] { loc.hostnameStart, loc.hostnameStart + loc.hostnameLength / 2 })
                 .ToList();
             var recordHeaderBuffer = ArrayPool<byte>.Shared.Rent(ClientHelloTlsRecordHeaderLength);
             originalClientHelloPacket.Span[..ClientHelloTlsRecordHeaderLength].CopyTo(recordHeaderBuffer);
@@ -118,7 +116,7 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
                 {
                     if (index != 0)
                     {
-                        await Task.Delay(100, cancellationToken);
+                        await Task.Delay(100, cancellationToken).ConfigureAwait(false);
                     }
                     var end = index < cuts.Count ? cuts[index] : originalClientHelloPacket.Length;
                     if (end < start || end > originalClientHelloPacket.Length)
@@ -153,13 +151,13 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
                         recordHeaderBuffer[3] = (byte) (fragmentLength >> 8);
                         recordHeaderBuffer[4] = (byte) fragmentLength;
                         Debug.WriteLine($"TlsRecordFragmentedStream.Write 2 header={Convert.ToHexString(recordHeaderBuffer, 0, ClientHelloTlsRecordHeaderLength)} payload={Convert.ToHexString(item.Span)}");
-                        await innerStream.WriteAsync(recordHeaderBuffer.AsMemory(0, ClientHelloTlsRecordHeaderLength), cancellationToken);
-                        await innerStream.FlushAsync(cancellationToken);
-                        await Task.Delay(100, cancellationToken);
+                        await innerStream.WriteAsync(recordHeaderBuffer.AsMemory(0, ClientHelloTlsRecordHeaderLength), cancellationToken).ConfigureAwait(false);
+                        await innerStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(100, cancellationToken).ConfigureAwait(false);
                     }
 
-                    await innerStream.WriteAsync(item, cancellationToken);
-                    await innerStream.FlushAsync(cancellationToken);
+                    await innerStream.WriteAsync(item, cancellationToken).ConfigureAwait(false);
+                    await innerStream.FlushAsync(cancellationToken).ConfigureAwait(false);
 
                     start = end;
                 }
@@ -168,7 +166,10 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
             {
                 ArrayPool<byte>.Shared.Return(recordHeaderBuffer);
             }
+            return;
         }
+
+        await innerStream.WriteAsync(originalClientHelloPacket, cancellationToken).ConfigureAwait(false);
     }
 
     // Forward other members to _innerStream...
@@ -178,11 +179,27 @@ public class TlsRecordFragmentedStream(Stream innerStream) : Stream
     public override long Length => innerStream.Length;
     public override long Position { get => innerStream.Position; set => innerStream.Position = value; }
     public override void Flush() => innerStream.Flush();
+    public override Task FlushAsync(CancellationToken cancellationToken) => innerStream.FlushAsync(cancellationToken);
     public override int Read(byte[] buffer, int offset, int count) => innerStream.Read(buffer, offset, count);
+    public override int Read(Span<byte> buffer) => innerStream.Read(buffer);
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        innerStream.ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+        innerStream.ReadAsync(buffer, cancellationToken);
     public override long Seek(long offset, SeekOrigin origin) => innerStream.Seek(offset, origin);
     public override void SetLength(long value) => innerStream.SetLength(value);
-    public override void Close()
+
+    protected override void Dispose(bool disposing)
     {
-        innerStream.Close();
+        if (disposing)
+            innerStream.Dispose();
+
+        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        await innerStream.DisposeAsync().ConfigureAwait(false);
+        GC.SuppressFinalize(this);
     }
 }

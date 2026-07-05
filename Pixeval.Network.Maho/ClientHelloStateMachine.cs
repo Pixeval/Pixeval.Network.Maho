@@ -1,4 +1,3 @@
-using System.Buffers;
 using Pixeval.Network.Maho.Desync;
 
 namespace Pixeval.Network.Maho;
@@ -28,11 +27,12 @@ public struct ClientHelloStateMachine()
         _clientHelloPacket = new ManagedByteBuffer(size);
     }
 
-    private void ReplaceClientHelloPacket(int size, byte[] buffer)
+    private void ResizeClientHelloPacket(int size)
     {
-        _clientHelloPacket?.Dispose();
+        var oldPacket = _clientHelloPacket;
         _clientHelloPacket = new ManagedByteBuffer(size);
-        _clientHelloPacket.Fill(buffer, 0, size);
+        oldPacket?.Memory.Span.CopyTo(_clientHelloPacket.Span);
+        oldPacket?.Dispose();
     }
 
     public ClientHelloPacketCollectingState FlowState(
@@ -55,7 +55,7 @@ public struct ClientHelloStateMachine()
         {
             case ClientHelloPacketCollectingState.Idle when buffer[offset] == ClientHelloMessageIdentifier:
                 // If this `Write` gives enough information of the record, that is, the record header is fully included.
-                if (count >= 5)
+                if (count >= ClientHelloTlsRecordHeaderLength)
                 {
                     // we need to separate into two cases
                     // 1. this buffer contains entire client hello packet, with potentially extra bytes
@@ -64,12 +64,13 @@ public struct ClientHelloStateMachine()
                     _clientHelloPacketCollectingState = ClientHelloPacketCollectingState.Collecting;
                     // reserve a byte array for the entire client hello packet (including the tls record header)
                     var clientHelloPayloadSize = (buffer[offset + 3] << 8) | buffer[offset + 4];
-                    ReplaceClientHelloPacket(5 + clientHelloPayloadSize);
+                    _clientHelloPacketSize = ClientHelloTlsRecordHeaderLength + clientHelloPayloadSize;
+                    ReplaceClientHelloPacket(_clientHelloPacketSize);
 
                     // Case 1: this buffer contains the entirety of the packet, with potential extra bytes.
                     if (count >= _clientHelloPacketSize)
                     {
-                        _clientHelloPacket!.Fill(buffer, offset, count - _clientHelloPacketSize);
+                        _clientHelloPacket!.Fill(buffer, offset, _clientHelloPacketSize);
                         _totallyCopiedClientHelloPacketSize = _clientHelloPacketSize;
                         // we send the fragmented packet and flow to `Emitted` state immediately.
                         _clientHelloPacketCollectingState = ClientHelloPacketCollectingState.Emitted;
@@ -124,15 +125,13 @@ public struct ClientHelloStateMachine()
                     var payloadSize = (_clientHelloPacket.Span[3] << 8) | _clientHelloPacket.Span[4];
                     // allocate a full-sized buffer
                     _clientHelloPacketSize = ClientHelloTlsRecordHeaderLength + payloadSize;
-                    var newBuffer = ArrayPool<byte>.Shared.Rent(_clientHelloPacketSize);
                     // copy the old buffer to the new buffer. Old buffer contains only 5 bytes
-                    _clientHelloPacket.Fill(newBuffer, 0, ClientHelloTlsRecordHeaderLength);
+                    ResizeClientHelloPacket(_clientHelloPacketSize);
                     // since we've copied `headerRemaining` elements, the next copy should skip these elements
                     var newOffset = offset + headerRemaining;
                     // copied to the segment start with offset 5
                     var toBeCopiedCount = Math.Min(count - headerRemaining, _clientHelloPacketSize - ClientHelloTlsRecordHeaderLength);
-                    Buffer.BlockCopy(buffer, newOffset, newBuffer, ClientHelloTlsRecordHeaderLength, toBeCopiedCount);
-                    ReplaceClientHelloPacket(_clientHelloPacketSize, newBuffer);
+                    _clientHelloPacket.Fill(buffer, newOffset, toBeCopiedCount, ClientHelloTlsRecordHeaderLength);
                     // ---++
                     //    ++****
                     // "-": the old buffer element
