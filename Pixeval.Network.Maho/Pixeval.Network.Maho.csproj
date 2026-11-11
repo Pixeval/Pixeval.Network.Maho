@@ -1,13 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFrameworks>net10.0;net11.0</TargetFrameworks>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<LangVersion>latest</LangVersion>
 		<UseECH Condition="'$(UseECH)' == ''">false</UseECH>
 		<UseDesync Condition="'$(UseDesync)' == ''">false</UseDesync>
-		<ImportDirectoryBuildTargets Condition="'$(UseECH)' != 'true'">false</ImportDirectoryBuildTargets>
 	</PropertyGroup>
 	<ItemGroup>
 		<RuntimeHostConfigurationOption Value="true" Include="System.Net.SocketsHttpHandler.Http3Support" />
